@@ -94,7 +94,7 @@ class NetworkTrainer(object):
         # too high the training will take forever
         self.train_loss_MA_alpha = 0.93  # alpha * old + (1-alpha) * new
         self.train_loss_MA_eps = 5e-4  # new MA must be at least this much better (smaller)
-        self.max_num_epochs = 1000
+        self.max_num_epochs = 500
         self.num_batches_per_epoch = 250
         self.num_val_batches_per_epoch = 50
         self.also_val_in_tr_mode = False
@@ -423,7 +423,7 @@ class NetworkTrainer(object):
 
         self._maybe_init_amp()
 
-        maybe_mkdir_p(self.output_folder)        
+        maybe_mkdir_p(self.output_folder)
         self.plot_network_architecture()
 
         if cudnn.benchmark and cudnn.deterministic:
@@ -451,13 +451,14 @@ class NetworkTrainer(object):
 
                         tbar.set_postfix(loss=l)
                         train_losses_epoch.append(l)
+
             else:
                 for _ in range(self.num_batches_per_epoch):
                     l = self.run_iteration(self.tr_gen, True)
                     train_losses_epoch.append(l)
 
             self.all_tr_losses.append(np.mean(train_losses_epoch))
-            self.print_to_log_file("train loss : %.4f" % self.all_tr_losses[-1])
+            self.print_to_log_file("train loss : %.4f" % (self.all_tr_losses[-1]))
 
             with torch.no_grad():
                 # validation with train=False
@@ -475,6 +476,103 @@ class NetworkTrainer(object):
                     val_losses = []
                     for b in range(self.num_val_batches_per_epoch):
                         l = self.run_iteration(self.val_gen, False)
+                        val_losses.append(l)
+                    self.all_val_losses_tr_mode.append(np.mean(val_losses))
+                    self.print_to_log_file("validation loss (train=True): %.4f" % self.all_val_losses_tr_mode[-1])
+
+            self.update_train_loss_MA()  # needed for lr scheduler and stopping of training
+
+            continue_training = self.on_epoch_end()
+
+            epoch_end_time = time()
+
+            if not continue_training:
+                # allows for early stopping
+                break
+
+            self.epoch += 1
+            self.print_to_log_file("This epoch took %f s\n" % (epoch_end_time - epoch_start_time))
+
+        self.epoch -= 1  # if we don't do this we can get a problem with loading model_final_checkpoint.
+
+        if self.save_final_checkpoint: self.save_checkpoint(join(self.output_folder, "model_final_checkpoint.model"))
+        # now we can delete latest as it will be identical with final
+        if isfile(join(self.output_folder, "model_latest.model")):
+            os.remove(join(self.output_folder, "model_latest.model"))
+        if isfile(join(self.output_folder, "model_latest.model.pkl")):
+            os.remove(join(self.output_folder, "model_latest.model.pkl"))
+
+    def run_training_SOR(self):
+        if not torch.cuda.is_available():
+            self.print_to_log_file("WARNING!!! You are attempting to run training on a CPU (torch.cuda.is_available() is False). This can be VERY slow!")
+
+        _ = self.tr_gen.next()
+        _ = self.val_gen.next()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        self._maybe_init_amp()
+
+        maybe_mkdir_p(self.output_folder)
+        self.plot_network_architecture()
+
+        if cudnn.benchmark and cudnn.deterministic:
+            warn("torch.backends.cudnn.deterministic is True indicating a deterministic training is desired. "
+                 "But torch.backends.cudnn.benchmark is True as well and this will prevent deterministic training! "
+                 "If you want deterministic then set benchmark=False")
+
+        if not self.was_initialized:
+            self.initialize(True)
+
+        while self.epoch < self.max_num_epochs:
+            self.print_to_log_file("\nepoch: ", self.epoch)
+            epoch_start_time = time()
+            train_losses_epoch = []
+            train_losses_epoch_seg = []
+            train_losses_epoch_mse = []
+
+            # train one epoch
+            self.network.train()
+
+            if self.use_progress_bar:
+                with trange(self.num_batches_per_epoch) as tbar:
+                    for b in tbar:
+                        tbar.set_description("Epoch {}/{}".format(self.epoch+1, self.max_num_epochs))
+
+                        l, loss_array = self.run_iteration(self.tr_gen, True)
+
+                        tbar.set_postfix(loss=l)
+                        train_losses_epoch.append(l)
+                        train_losses_epoch_seg.append(loss_array[0])
+                        train_losses_epoch_mse.append(loss_array[1])
+
+            else:
+                for _ in range(self.num_batches_per_epoch):
+                    l, loss_array = self.run_iteration(self.tr_gen, True)
+                    train_losses_epoch.append(l)
+                    train_losses_epoch_seg.append(loss_array[0])
+                    train_losses_epoch_mse.append(loss_array[1])
+
+            self.all_tr_losses.append(np.mean(train_losses_epoch))
+            self.print_to_log_file("train loss : %.4f seg : %.4f laplace %.4f" % (self.all_tr_losses[-1],np.mean(train_losses_epoch_seg),np.mean(train_losses_epoch_mse)))
+
+            with torch.no_grad():
+                # validation with train=False
+                self.network.eval()
+                val_losses = []
+                for b in range(self.num_val_batches_per_epoch):
+                    l, loss_array = self.run_iteration(self.val_gen, False, True)
+                    val_losses.append(l)
+                self.all_val_losses.append(np.mean(val_losses))
+                self.print_to_log_file("validation loss: %.4f" % self.all_val_losses[-1])
+
+                if self.also_val_in_tr_mode:
+                    self.network.train()
+                    # validation with train=True
+                    val_losses = []
+                    for b in range(self.num_val_batches_per_epoch):
+                        l, loss_array = self.run_iteration(self.val_gen, False)
                         val_losses.append(l)
                     self.all_val_losses_tr_mode.append(np.mean(val_losses))
                     self.print_to_log_file("validation loss (train=True): %.4f" % self.all_val_losses_tr_mode[-1])
@@ -573,7 +671,7 @@ class NetworkTrainer(object):
 
             if self.val_eval_criterion_MA > self.best_val_eval_criterion_MA:
                 self.best_val_eval_criterion_MA = self.val_eval_criterion_MA
-                #self.print_to_log_file("saving best epoch checkpoint...")
+                self.print_to_log_file("saving best epoch checkpoint...")
                 if self.save_best_checkpoint: self.save_checkpoint(join(self.output_folder, "model_best.model"))
 
             # Now see if the moving average of the train loss has improved. If yes then reset patience, else
@@ -705,7 +803,7 @@ class NetworkTrainer(object):
 
         for batch_num in range(1, num_iters + 1):
             # +1 because this one here is not designed to have negative loss...
-            loss = self.run_iteration(self.tr_gen, do_backprop=True, run_online_evaluation=False).data.item() + 1
+            loss, loss_array  = self.run_iteration(self.tr_gen, do_backprop=True, run_online_evaluation=False).data.item() + 1
 
             # Compute the smoothed loss
             avg_loss = beta * avg_loss + (1 - beta) * loss

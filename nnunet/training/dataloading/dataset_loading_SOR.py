@@ -215,15 +215,23 @@ class DataLoader3D(SlimDataLoaderBase):
             case_all_data = np.load(self._data[k]['data_file'][:-4] + ".npy", self.memmap_mode)
         else:
             case_all_data = np.load(self._data[k]['data_file'])['data']
+        
+        # SR edits. Second modality is actually a target image. Move to target during data_augmentation
         num_color_channels = case_all_data.shape[0] - 1
+        #num_color_channels -= 1 # -2 if adding to seg, -1 if adding to data
         data_shape = (self.batch_size, num_color_channels, *self.patch_size)
+       
+        # Add laplacian map as an additional channel on the segmentation
+        #num_seg += 1
         seg_shape = (self.batch_size, num_seg, *self.patch_size)
+
         return data_shape, seg_shape
 
     def generate_train_batch(self):
         selected_keys = np.random.choice(self.list_of_keys, self.batch_size, True, None)
         data = np.zeros(self.data_shape, dtype=np.float32)
         seg = np.zeros(self.seg_shape, dtype=np.float32)
+        
         case_properties = []
         for j, i in enumerate(selected_keys):
             # oversampling foreground will improve stability of model training, especially if many patches are empty
@@ -355,17 +363,32 @@ class DataLoader3D(SlimDataLoaderBase):
                                           valid_bbox_y_lb:valid_bbox_y_ub,
                                           valid_bbox_z_lb:valid_bbox_z_ub]
 
+            # SR edit to include second target image
+            # Data is everything is everything till the last 1 channel
+            #In the case where laplace gets added to seg, change these to :-2 and -2:
             data[j] = np.pad(case_all_data[:-1], ((0, 0),
                                                   (-min(0, bbox_x_lb), max(bbox_x_ub - shape[0], 0)),
                                                   (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
                                                   (-min(0, bbox_z_lb), max(bbox_z_ub - shape[2], 0))),
                              self.pad_mode, **self.pad_kwargs_data)
-
-            seg[j, 0] = np.pad(case_all_data[-1:], ((0, 0),
+     
+            """
+            ## Laplacian map
+            seg[j, 0] = np.pad(case_all_data[-2:-1], ((0, 0),
                                                     (-min(0, bbox_x_lb), max(bbox_x_ub - shape[0], 0)),
                                                     (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
                                                     (-min(0, bbox_z_lb), max(bbox_z_ub - shape[2], 0))),
                                'constant', **{'constant_values': -1})
+            """
+
+            #Segmentation
+            seg[j, 0] = np.pad(case_all_data[-1:], ((0, 0),
+                                                    (-min(0, bbox_x_lb), max(bbox_x_ub - shape[0], 0)),
+                                                    (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
+                                                    (-min(0, bbox_z_lb), max(bbox_z_ub - shape[2], 0))),
+                                'constant', **{'constant_values': -1})
+
+
             if seg_from_previous_stage is not None:
                 seg[j, 1] = np.pad(seg_from_previous_stage, ((0, 0),
                                                              (-min(0, bbox_x_lb),
@@ -375,7 +398,7 @@ class DataLoader3D(SlimDataLoaderBase):
                                                              (-min(0, bbox_z_lb),
                                                               max(bbox_z_ub - shape[2], 0))),
                                    'constant', **{'constant_values': 0})
-        return {'data': data, 'seg': seg, 'properties': case_properties, 'keys': selected_keys}
+        return {'data': data, 'seg': seg,'properties': case_properties, 'keys': selected_keys}
 
 
 class DataLoader2D(SlimDataLoaderBase):

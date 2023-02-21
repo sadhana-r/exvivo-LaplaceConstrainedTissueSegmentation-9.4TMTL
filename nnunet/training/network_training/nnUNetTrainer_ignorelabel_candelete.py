@@ -45,7 +45,7 @@ from nnunet.utilities.tensor_utilities import sum_tensor
 matplotlib.use("agg")
 
 
-class nnUNetTrainer(NetworkTrainer):
+class nnUNetTrainer_ignorelabel(NetworkTrainer):
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False):
         """
@@ -68,6 +68,7 @@ class nnUNetTrainer(NetworkTrainer):
         if stage 1 exists then stage 1 is the high resolution stage, otherwise it's 0
         :param unpack_data: if False, npz preprocessed data will not be unpacked to npy. This consumes less space but
         is considerably slower! Running unpack_data=False with 2d should never be done!
+
         IMPORTANT: If you inherit from nnUNetTrainer and the init args change then you need to redefine self.init_args
         in your init accordingly. Otherwise checkpoints won't load properly!
         """
@@ -104,7 +105,8 @@ class nnUNetTrainer(NetworkTrainer):
         self.basic_generator_patch_size = self.data_aug_params = self.transpose_forward = self.transpose_backward = None
 
         self.batch_dice = batch_dice
-        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': False}, {})
+        self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': False}, {}, ignore_label = 0)
+        # SR edited above line to ignore label 0 in loss computation
 
         self.online_eval_foreground_dc = []
         self.online_eval_tp = []
@@ -314,10 +316,6 @@ class nnUNetTrainer(NetworkTrainer):
     def run_training(self):
         self.save_debug_information()
         super(nnUNetTrainer, self).run_training()
-
-    def run_training_SOR(self):
-        self.save_debug_information()
-        super(nnUNetTrainer, self).run_training_SOR()
 
     def load_plans_file(self):
         """
@@ -611,9 +609,9 @@ class nnUNetTrainer(NetworkTrainer):
                 else:
                     softmax_fname = None
 
-                """There is a problem with python process communication that prevents us from communicating objects
+                """There is a problem with python process communication that prevents us from communicating obejcts
                 larger than 2 GB between processes (basically when the length of the pickle string that will be sent is
-                communicated by the multiprocessing.Pipe object then the placeholder (I think) does not allow for long
+                communicated by the multiprocessing.Pipe object then the placeholder (\%i I think) does not allow for long
                 enough strings (lol). This could be fixed by changing i to l (for long) but that would require manually
                 patching system python code. We circumvent that problem here by saving softmax_pred to a npy file that will
                 then be read (and finally deleted) by the Process. save_segmentation_nifti_from_softmax can take either
