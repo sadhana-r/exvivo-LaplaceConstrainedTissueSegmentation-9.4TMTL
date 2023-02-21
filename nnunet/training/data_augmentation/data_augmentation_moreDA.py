@@ -48,9 +48,11 @@ def get_moreDA_augmentation(dataloader_train, dataloader_val, patch_size, params
 
     tr_transforms = []
 
+    # Default is None
     if params.get("selected_data_channels") is not None:
         tr_transforms.append(DataChannelSelectionTransform(params.get("selected_data_channels")))
 
+    # set to [0] in nnUnetTrainerV2
     if params.get("selected_seg_channels") is not None:
         tr_transforms.append(SegChannelSelectionTransform(params.get("selected_seg_channels")))
 
@@ -116,6 +118,7 @@ def get_moreDA_augmentation(dataloader_train, dataloader_val, patch_size, params
 
     tr_transforms.append(RemoveLabelTransform(-1, 0))
 
+    # Only used in cascade mode
     if params.get("move_last_seg_chanel_to_data") is not None and params.get("move_last_seg_chanel_to_data"):
         tr_transforms.append(MoveSegAsOneHotToData(1, params.get("all_segmentation_labels"), 'seg', 'data'))
         if params.get("cascade_do_cascade_augmentations") is not None and params.get(
@@ -139,10 +142,12 @@ def get_moreDA_augmentation(dataloader_train, dataloader_val, patch_size, params
 
     tr_transforms.append(RenameTransform('seg', 'target', True))
 
+    # default regions = None used in nnUnetTrainer_V2
     if regions is not None:
         tr_transforms.append(ConvertSegmentationToRegionsTransform(regions, 'target', 'target'))
 
     if deep_supervision_scales is not None:
+        #Default is false
         if soft_ds:
             assert classes is not None
             tr_transforms.append(DownsampleSegForDSTransform3(deep_supervision_scales, 'target', 'target', classes))
@@ -182,6 +187,7 @@ def get_moreDA_augmentation(dataloader_train, dataloader_val, patch_size, params
         val_transforms.append(ConvertSegmentationToRegionsTransform(regions, 'target', 'target'))
 
     if deep_supervision_scales is not None:
+        # default is False
         if soft_ds:
             assert classes is not None
             val_transforms.append(DownsampleSegForDSTransform3(deep_supervision_scales, 'target', 'target', classes))
