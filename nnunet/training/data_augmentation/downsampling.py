@@ -102,3 +102,30 @@ def downsample_seg_for_ds_transform2(seg, ds_scales=((1, 1, 1), (0.5, 0.5, 0.5),
                     out_seg[b, c] = resize_segmentation(seg[b, c], new_shape[2:], order)
             output.append(out_seg)
     return output
+
+# SR edit to account for Laplacian map in segmentation as an additionl channel. Not used during deep supervision 
+def downsample_seg_for_ds_transform2_SR(seg, ds_scales=((1, 1, 1), (0.5, 0.5, 0.5), (0.25, 0.25, 0.25)), order=0, axes=None):
+    if axes is None:
+        axes = list(range(2, len(seg.shape)))
+    output = []
+    
+    #Separate laplacian map from seg - shouldn't be downsampled. Append to the output
+    output.append(seg[:,1:]) # Laplacian map is the second channel. First channel of output
+
+    #Actual segmentation is just the first channel
+    seg = seg[:,0:]
+
+    for s in ds_scales:
+        if all([i == 1 for i in s]):
+            output.append(seg)
+        else:
+            new_shape = np.array(seg.shape).astype(float)
+            for i, a in enumerate(axes):
+                new_shape[a] *= s[i]
+            new_shape = np.round(new_shape).astype(int)
+            out_seg = np.zeros(new_shape, dtype=seg.dtype)
+            for b in range(seg.shape[0]):
+                for c in range(seg.shape[1]):
+                    out_seg[b, c] = resize_segmentation(seg[b, c], new_shape[2:], order)
+            output.append(out_seg)
+    return output
