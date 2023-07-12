@@ -1,4 +1,6 @@
-**Modified nnU-Net V1 to incorporate Laplacian Solver** 
+# Modified nnU-Net V1 to incorporate Laplacian Solver
+
+Cite as: Ravikumar, S. et al. (2023). Improved Segmentation of Deep Sulci in Cortical Gray Matter Using a Deep Learning Framework Incorporating Laplace’s Equation. In: Frangi, A., de Bruijne, M., Wassermann, D., Navab, N. (eds) Information Processing in Medical Imaging. IPMI 2023. Lecture Notes in Computer Science, vol 13939. Springer, Cham. https://doi.org/10.1007/978-3-031-34048-2_53
 
 
 # nnU-Net
